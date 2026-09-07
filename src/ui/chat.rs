@@ -22,9 +22,36 @@ impl ChatPanel {
         }
     }
 
+    /// In-memory bounds: render cap is 100, but the Vec itself must also be
+    /// bounded or long sessions grow RAM + sled blobs without limit.
+    pub const MAX_MESSAGES: usize = 500;
+    /// Single-message content cap (chars). Guards against a runaway model
+    /// streaming megabytes into RAM and into the sled blob on save.
+    pub const MAX_CONTENT_CHARS: usize = 50_000;
+
     pub fn clear_chat(&mut self) {
         self.messages.clear();
+        self.messages.shrink_to_fit();
         self.input.clear();
+    }
+
+    fn push_capped(&mut self, msg: ChatMessage) {
+        if self.messages.len() >= Self::MAX_MESSAGES {
+            let overflow = self.messages.len() - Self::MAX_MESSAGES + 1;
+            self.messages.drain(0..overflow);
+        }
+        self.messages.push(msg);
+    }
+
+    fn cap_content(s: &str) -> String {
+        if s.len() > Self::MAX_CONTENT_CHARS {
+            // char-boundary safe truncation + marker
+            let mut end = Self::MAX_CONTENT_CHARS;
+            while !s.is_char_boundary(end) { end -= 1; }
+            format!("{}…[truncated {} chars]", &s[..end], s.len() - end)
+        } else {
+            s.to_string()
+        }
     }
 
     pub fn messages(&self) -> &[ChatMessage] {
@@ -106,8 +133,7 @@ impl ChatPanel {
                 }
                 let start = total.saturating_sub(100);
                 for i in start..total {
-                    let msg = self.messages[i].clone();
-                    self.show_message(ui, &msg, tx);
+                    self.show_message(ui, &self.messages[i], tx);
                 }
                 if self.is_streaming {
                     ui.horizontal(|ui| {
@@ -379,12 +405,17 @@ impl ChatPanel {
             return;
         }
 
+        let prompt = if prompt.len() > Self::MAX_CONTENT_CHARS {
+            let mut end = Self::MAX_CONTENT_CHARS;
+            while !prompt.is_char_boundary(end) { end -= 1; }
+            prompt[..end].to_string()
+        } else { prompt };
         let user_msg = ChatMessage {
             role: "user".to_string(),
             content: prompt.clone(),
             timestamp: chrono::Utc::now(),
         };
-        self.messages.push(user_msg);
+        self.push_capped(user_msg);
         self.input.clear();
         let model_name = model_name.clone();
         let client = client.clone();
@@ -436,18 +467,19 @@ impl ChatPanel {
             Ok(resp) => {
                 let msg = ChatMessage {
                     role: "assistant".to_string(),
-                    content: resp.message.content,
+                    content: Self::cap_content(&resp.message.content),
                     timestamp: chrono::Utc::now(),
                 };
-                self.messages.push(msg);
+                self.push_capped(msg);
             }
             Err(e) => {
+                let em = format!("Request failed: {e}");
                 let msg = ChatMessage {
                     role: "system".to_string(),
-                    content: format!("Request failed: {e}"),
+                    content: Self::cap_content(&em),
                     timestamp: chrono::Utc::now(),
                 };
-                self.messages.push(msg);
+                self.push_capped(msg);
             }
         }
     }

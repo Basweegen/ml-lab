@@ -1,10 +1,11 @@
-use crate::neural::{ModelProfileNetwork, SerializableArray1, SerializableArray2};
-use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Vec2};
+use crate::neural::ModelProfileNetwork;
+use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use egui_plot::{Line, Plot, PlotPoints};
 use ndarray::Array2;
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NeuralVizPanel {
     pub training_history: VecDeque<f32>,
     pub max_history_len: usize,
@@ -98,6 +99,9 @@ impl NeuralVizPanel {
         let rect = response.rect;
         let center_y = rect.center().y;
 
+        // Convert each weight matrix ONCE (was: cloned+converted per connection,
+        // i.e. rows*cols clones per layer per frame at 60fps).
+        let w_mats: Vec<Array2<f32>> = network.weights.iter().map(|w| w.clone().into()).collect();
         // Draw connections first (behind neurons)
         for l in 0..num_layers - 1 {
             let x1 = rect.left() + layer_spacing * (l + 1) as f32;
@@ -114,8 +118,8 @@ impl NeuralVizPanel {
                     let y2 = end_y + j as f32 * vertical_spacing;
 
                     // Get weight value for color intensity
-                    let weight_val = if l < network.weights.len() {
-                        let w_arr: Array2<f32> = network.weights[l].clone().into();
+                    let weight_val = if l < w_mats.len() {
+                        let w_arr = &w_mats[l];
                         if j < w_arr.nrows() && i < w_arr.ncols() {
                             w_arr[[j, i]].abs().min(1.0)
                         } else {
@@ -207,7 +211,7 @@ impl NeuralVizPanel {
         // Click handling for layer selection
         if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
-                for (l, &dim) in layer_dims.iter().enumerate() {
+                for (l, &_dim) in layer_dims.iter().enumerate() {
                     let x = rect.left() + layer_spacing * (l + 1) as f32;
                     if (pos.x - x).abs() < neuron_radius * 2.0 {
                         // This would require mut self - we'll handle selection differently
@@ -246,7 +250,6 @@ impl NeuralVizPanel {
         ui.label(egui::RichText::new("Weight Matrices").size(18.0).color(Color32::from_rgb(0x00, 0xaa, 0xff)).strong());
         ui.add_space(8.0);
 
-        let layer_dims = Self::get_layer_dims(network);
         let num_layers = network.weights.len();
 
         egui::ScrollArea::horizontal().show(ui, |ui| {
@@ -302,7 +305,7 @@ impl NeuralVizPanel {
         });
     }
 
-    fn render_heatmap(&self, ui: &mut egui::Ui, matrix: &Array2<f32>, id: &str) {
+    fn render_heatmap(&self, ui: &mut egui::Ui, matrix: &Array2<f32>, _id: &str) {
         let rows = matrix.nrows();
         let cols = matrix.ncols();
 
@@ -389,7 +392,7 @@ impl NeuralVizPanel {
         }
     }
 
-    fn render_bias_heatmap(&self, ui: &mut egui::Ui, vector: &ndarray::Array1<f32>, id: &str) {
+    fn render_bias_heatmap(&self, ui: &mut egui::Ui, vector: &ndarray::Array1<f32>, _id: &str) {
         let len = vector.len();
         if len == 0 {
             ui.label("Empty bias vector");
