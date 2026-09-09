@@ -10,6 +10,7 @@ pub struct ChatPanel {
     messages: Vec<ChatMessage>,
     is_streaming: bool,
     voice_enabled: bool,
+    revision: u64,
 }
 
 impl ChatPanel {
@@ -19,6 +20,7 @@ impl ChatPanel {
             messages: Vec::new(),
             is_streaming: false,
             voice_enabled: false,
+            revision: 0,
         }
     }
 
@@ -33,6 +35,7 @@ impl ChatPanel {
         self.messages.clear();
         self.messages.shrink_to_fit();
         self.input.clear();
+        self.revision = self.revision.saturating_add(1);
     }
 
     fn push_capped(&mut self, msg: ChatMessage) {
@@ -41,6 +44,7 @@ impl ChatPanel {
             self.messages.drain(0..overflow);
         }
         self.messages.push(msg);
+        self.revision = self.revision.saturating_add(1);
     }
 
     fn cap_content(s: &str) -> String {
@@ -56,6 +60,18 @@ impl ChatPanel {
 
     pub fn messages(&self) -> &[ChatMessage] {
         &self.messages
+    }
+
+    /// Bumped on every local change; the app persists the chat when it differs.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Replace chat contents with a stored session (History -> Open in chat).
+    pub fn load_messages(&mut self, msgs: Vec<ChatMessage>) {
+        let start = msgs.len().saturating_sub(Self::MAX_MESSAGES);
+        self.messages = msgs[start..].to_vec();
+        self.revision = self.revision.saturating_add(1);
     }
 
     pub fn set_voice_enabled(&mut self, enabled: bool) {
