@@ -18,8 +18,13 @@ if [[ -d "${DATA_DIR}" ]]; then
 fi
 
 # Ensure GUI display variables are populated if running from subshell
-if [[ -z "${WAYLAND_DISPLAY}" && -e "/run/user/$(id -u)/wayland-0" ]]; then
-    export WAYLAND_DISPLAY="wayland-0"
+if [[ -z "${WAYLAND_DISPLAY}" ]]; then
+    for sock in /run/user/$(id -u)/wayland-*; do
+        if [[ -S "$sock" ]]; then
+            export WAYLAND_DISPLAY="$(basename "$sock")"
+            break
+        fi
+    done
 fi
 if [[ -z "${DISPLAY}" ]]; then
     export DISPLAY=":0"
